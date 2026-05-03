@@ -1,0 +1,65 @@
+# docker-compose.yaml — orchestrates the Node.js app + PostgreSQL database
+# Usage: docker compose up --build
+
+services:
+  # -------- PostgreSQL database --------
+  db:
+    image: postgres:16-alpine
+    container_name: books-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: booksdb
+    volumes:
+      # Persistent storage for the database — survives container restarts.
+      - db-data:/var/lib/postgresql/data
+      # Init script — runs ONCE on first startup of an empty volume.
+      - ./init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    ports:
+      - "5432:5432"
+    networks:
+      - books-net
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d booksdb"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # -------- Node.js CRUD app --------
+  app:
+    build:
+      context: ./app
+      dockerfile: Dockerfile
+    container_name: books-app
+    restart: unless-stopped
+    environment:
+      DB_HOST: db
+      DB_PORT: 5432
+      DB_USER: postgres
+      DB_PASSWORD: postgres
+      DB_NAME: booksdb
+      PORT: 3000
+      NODE_ENV: production
+    ports:
+      - "3000:3000"
+    networks:
+      - books-net
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget --quiet --tries=1 --spider http://localhost:3000/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+# Named volume for Postgres data (assignment requires named volume)
+volumes:
+  db-data:
+
+# Custom network so containers can find each other by name (assignment requires)
+networks:
+  books-net:
+    driver: bridge
