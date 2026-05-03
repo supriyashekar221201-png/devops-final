@@ -1,0 +1,85 @@
+# app.yaml — Node.js CRUD application
+# Resources: Deployment, Service
+
+# ---------- App Deployment ----------
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: app
+  namespace: books
+  labels:
+    app: books-app
+spec:
+  replicas: 1                       # Assignment requires replicas: 1
+  selector:
+    matchLabels:
+      app: books-app
+  template:
+    metadata:
+      labels:
+        app: books-app
+    spec:
+      containers:
+        - name: books-app
+          image: books-app:1.0
+          imagePullPolicy: IfNotPresent   # Use the local Minikube image, don't try to pull from Docker Hub
+          ports:
+            - containerPort: 3000
+          env:
+            - name: DB_HOST
+              value: db                    # service name from database.yaml
+            - name: DB_PORT
+              value: "5432"
+            - name: DB_USER
+              value: postgres
+            - name: DB_PASSWORD
+              value: postgres
+            - name: DB_NAME
+              value: booksdb
+            - name: PORT
+              value: "3000"
+            - name: NODE_ENV
+              value: production
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "128Mi"
+            limits:
+              cpu: "500m"
+              memory: "256Mi"
+          # Readiness: don't send traffic until /health returns 200
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 3000
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 3
+          # Liveness: restart pod if /health is unreachable
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 3000
+            initialDelaySeconds: 20
+            periodSeconds: 15
+            timeoutSeconds: 5
+            failureThreshold: 3
+---
+# ---------- App Service ----------
+# NodePort exposes the app outside the cluster on a node port (30000-32767).
+# Justification: Minikube doesn't have a real LoadBalancer; NodePort is the
+# simplest way to reach the app from a browser via `minikube service`.
+apiVersion: v1
+kind: Service
+metadata:
+  name: app
+  namespace: books
+spec:
+  type: NodePort
+  selector:
+    app: books-app
+  ports:
+    - port: 3000          # service port (within cluster)
+      targetPort: 3000    # container port
+      nodePort: 30080     # external port on the minikube node

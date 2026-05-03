@@ -1,0 +1,118 @@
+# database.yaml — PostgreSQL setup
+# Resources: PersistentVolumeClaim, ConfigMap (init.sql), Deployment, Service
+
+# ---------- PersistentVolumeClaim ----------
+# Requests 1Gi of storage for Postgres data so it survives pod restarts.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: db-pvc
+  namespace: books
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 1Gi
+---
+# ---------- ConfigMap with init.sql ----------
+# Holds the SQL that creates the books table and seeds 3 rows.
+# Postgres reads anything in /docker-entrypoint-initdb.d/ on first boot.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: db-init-sql
+  namespace: books
+data:
+  init.sql: |
+    CREATE TABLE IF NOT EXISTS books (
+        id              SERIAL PRIMARY KEY,
+        title           TEXT NOT NULL,
+        author          TEXT,
+        published_year  INTEGER,
+        created_at      TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
+
+    INSERT INTO books (title, author, published_year) VALUES
+        ('The Pragmatic Programmer', 'Andrew Hunt', 1999),
+        ('Clean Code', 'Robert C. Martin', 2008),
+        ('Designing Data-Intensive Applications', 'Martin Kleppmann', 2017)
+    ON CONFLICT DO NOTHING;
+---
+# ---------- Postgres Deployment ----------
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: db
+  namespace: books
+  labels:
+    app: db
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: db
+  template:
+    metadata:
+      labels:
+        app: db
+    spec:
+      containers:
+        - name: postgres
+          image: postgres:16-alpine
+          ports:
+            - containerPort: 5432
+          env:
+            - name: POSTGRES_USER
+              value: postgres
+            - name: POSTGRES_PASSWORD
+              value: postgres
+            - name: POSTGRES_DB
+              value: booksdb
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "128Mi"
+            limits:
+              cpu: "500m"
+              memory: "512Mi"
+          readinessProbe:
+            exec:
+              command: ["pg_isready", "-U", "postgres", "-d", "booksdb"]
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            timeoutSeconds: 3
+          livenessProbe:
+            exec:
+              command: ["pg_isready", "-U", "postgres", "-d", "booksdb"]
+            initialDelaySeconds: 15
+            periodSeconds: 10
+            timeoutSeconds: 5
+          volumeMounts:
+            - name: db-storage
+              mountPath: /var/lib/postgresql/data
+              subPath: pgdata
+            - name: init-sql
+              mountPath: /docker-entrypoint-initdb.d
+      volumes:
+        - name: db-storage
+          persistentVolumeClaim:
+            claimName: db-pvc
+        - name: init-sql
+          configMap:
+            name: db-init-sql
+---
+# ---------- Postgres Service ----------
+# ClusterIP = internal only. The app reaches Postgres at hostname "db" on port 5432.
+apiVersion: v1
+kind: Service
+metadata:
+  name: db
+  namespace: books
+spec:
+  type: ClusterIP
+  selector:
+    app: db
+  ports:
+    - port: 5432
+      targetPort: 5432
