@@ -1,0 +1,52 @@
+# hpa.yaml — HorizontalPodAutoscaler for the books-app deployment
+# Automatically scales replicas based on CPU usage.
+#
+# Justification for chosen thresholds:
+#   - minReplicas: 1 — matches the assignment's required base replica count
+#   - maxReplicas: 5 — bounds the autoscaling range so a runaway test cannot
+#     exhaust cluster resources on a single-node Minikube setup
+#   - target CPU: 70% — industry-standard default; leaves headroom for spikes
+#     before more pods are spun up. Below this, the system is comfortably
+#     under-utilised; above this, scale-out begins.
+#
+# Note: The metrics-server addon must be enabled in Minikube for HPA to function.
+#   minikube addons enable metrics-server
+
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: app-hpa
+  namespace: books
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: app
+  minReplicas: 1
+  maxReplicas: 5
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 70
+    - type: Resource
+      resource:
+        name: memory
+        target:
+          type: Utilization
+          averageUtilization: 80
+  behavior:
+    scaleUp:
+      stabilizationWindowSeconds: 30
+      policies:
+        - type: Pods
+          value: 2
+          periodSeconds: 30
+    scaleDown:
+      stabilizationWindowSeconds: 120
+      policies:
+        - type: Pods
+          value: 1
+          periodSeconds: 60
